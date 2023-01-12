@@ -1,0 +1,156 @@
+---
+title: "Plotting Time Series Data from multiple files"
+author: "Alexandre Bokhobza"
+output: html_notebook
+---
+
+**Aim**: Create a figure panel for plotting continuous data (time series).\
+Works for plotting Time series data from several data file (excel table).
+
+**Contact**: [alexandre.bokhobza\@gmail.com](mailto:alexandre.bokhobza@gmail.com){.email}
+
+**Reference used for creating this notebook**: Goedhart, J. (2022) DataViz protocols - An introduction to data visualization protocols for wet lab scientists, doi: [10.5281/zenodo.7257808](https://zenodo.org/record/7257808#.Y6LaJXbMIQ8)
+
+------------------------------------------------------------------------
+
+### Preparation steps.
+
+1.  Loading of the required packages.
+
+The packages are loaded using the function "library".
+
+*Note: To install packages, use the following function: "install.packages('name_of_package')"*
+
+```{r}
+library(tidyverse)
+library(here)
+library(shiny)
+library(fs)
+```
+
+### Important note:
+
+2.  Required root folder structure:
+
+For the notebook to work you need to have your root folder structured as follow (press play):
+
+```{r echo=FALSE}
+dir_tree(path = "..", type = 'directory', recurse = TRUE)
+```
+
+3.  Setting up the 'Here' package.
+
+The function "here()" is used to declare the location of the current script as the root for the project folder.\
+*As a consequence, no absolute path will be required anymore and the Notebook can be used on any machine given that the folder structure is respected).*\
+More info can be found at: [here](https://here.r-lib.org/articles/here.html)
+
+```{r}
+here::i_am("Time_series_plot_for_Ca2+.Rproj")
+```
+
+4.  Include session information.
+
+It is good practice to include session information
+
+```{r}
+xfun::session_info()
+```
+
+### Step 1: Create an object that includes the path to the data files.
+
+```{r}
+data_path <- paste(here("data", "raw_data"), list.files(here("data", "raw_data")), sep = "/")
+head(data_path)
+```
+
+### Step 2: Loading (reading) data & generate a 'nested' dataframe (dataframe of dataframes)
+
+The data are loaded from the excel files using the function "readxl".\
+The loaded data are included in an "R object" named 'df_input' using the character: '\<-'.\
+In addition, the first lanes of the object are visualized using the function "head".\
+*Note: df stands for dataframe (type of data loaded)*
+
+```{r}
+df_input <- map(data_path, readxl::read_excel)
+head(df_input)
+```
+
+### Step 3: Naming the loaded dataframe according to the files names.
+
+This could be changed by a button to specify the desired name
+
+```{r}
+names(df_input) <- str_replace(list.files(here("data", "raw_data")), pattern = ".xlsx", replacement = "")
+head(df_input)
+```
+
+### Step4: Merge the dataframes.
+
+A single dataframe with all data is generated.\
+A new column named 'id' is created to keep the origin of the date (initial filename).
+
+```{r}
+df <- bind_rows(df_input, .id = 'id')
+head(df)
+```
+
+### Step5: Reshaping data to tidy format
+
+1.  Remove empty space in data frame and replace it by an underscore.\
+    The function "str_replace" is used to replace a character string with another one.\
+    Here the space ' ' is replaced by underscore '\_' with the arguments "pattern =" and "replacement =".
+
+```{r}
+names(df) <- str_replace(names(df), pattern = " ", replacement = "_")
+head(df)
+```
+
+2.  Give the generic name "Time" to the column "Time (sec)".\
+    The function"rename" is used to change the name of the column in the following way: "new_name=old_name". **This might be changed with a user input command to choose the desired name**
+
+```{r}
+df <- rename(df, Time='Time_(sec)')
+head(df)
+```
+
+3.  Tidy the data.\
+    All the value data for every sample are attributed to a single column.\
+    The function pivot_longer is used with the following arguments:\
+    -   'cols = -c(id, Time)' exclude (with the '-' character) the columns id and Time from being modified.\
+    -   'names_to = "Sample"' Creates a column with a header 'Sample' containing character string.\
+    -   'values_to = "Value"' Creates a column with a header 'Value' containing numerical values.
+
+```{r}
+df_tidy <- pivot_longer(df, 
+                        cols = -c(id, Time),
+                        names_to = "Sample",
+                        values_to = "Value")
+head(df_tidy)
+```
+
+4.  Save the tidy dataframe.\
+
+```{r}
+df_tidy %>% write.csv(file.path(here("data", "processed_data"), "tidy_merged_data.csv"), row.names = FALSE)
+```
+
+
+### Step3: Generate plot using ggplot.
+
+This uses the function ggplot function with the following arguments
+
+```{r}
+ggplot(data = df_tidy,
+       aes(x=Time, 
+           y=Value, 
+           group=id)) + geom_line(aes(color=Sample)) + theme(legend.position = "none")
+
+```
+````{r}
+ggplot(data = df_tidy,
+       aes(x=Time,
+           y=Value,
+           group=id)) + geom_line(aes(color=id)) + theme(legend.position = "none") + stat_summary(fun = mean, geom='line', size=2)
+
+````
+Add option to the graph (change display) + save image

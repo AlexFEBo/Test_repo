@@ -1,0 +1,534 @@
+---
+title: "Integrate area under curve"
+output: html_notebook
+author: AlexFEBo 
+---
+
+**Aim**: calculate the area under for a time series.\
+**Contact**: [alexandre.bokhobza\@gmail.com](mailto:alexandre.bokhobza@gmail.com){.email}
+**Reference used for creating this notebook**:https://smin95.github.io/dataviz/calculating-area-under-a-curve.html
+
+-------------------------------------------------------------------------------
+
+### Preparatory steps:
+
+1. Load appropriate libraries.
+
+```{r warning=FALSE}
+library(tidyverse)
+library(smplot2)
+library(cowplot)
+library(fs)
+library(here)
+library(shiny)
+```
+
+## Important note:
+
+2.  Required root folder structure:
+
+For the notebook to work you need to have your root folder structured as follow (press play):
+
+```{r echo=FALSE}
+dir_tree(path = ".", type = 'directory', recurse = TRUE)
+```
+
+3.  Setting up the 'Here' package.
+
+The function "here()" is used to declare the location of the current script as the root for the project folder.\
+*As a consequence, no absolute path will be required anymore and the Notebook can be used on any machine given that the folder structure is respected).*\
+More info can be found at: [here](https://here.r-lib.org/articles/here.html)
+
+```{r}
+here::i_am("Integrating_curve_area.Rproj")
+```
+4.  Include session information.
+
+It is good practice to include session information
+
+```{r}
+xfun::session_info()
+```
+
+-------------------------------------------------------------------------------
+
+### Step 1: Create an object that includes the path to the data files.
+
+```{r}
+data_path <- paste(here("data", "raw_data"), list.files(here("data", "raw_data")), sep = "/")
+head(data_path)
+```
+
+### Step 2: Loading (reading) data & generate a 'nested' dataframe (dataframe of dataframes)
+
+The data are loaded from the excel files using the function "readxl".\
+The loaded data are included in an "R object" named 'df_input' using the character: '\<-'.\
+In addition, the first lanes of the object are visualized using the function "head".\
+*Note: df stands for dataframe (type of data loaded)*
+
+```{r}
+df_input <- map(data_path, readxl::read_excel)
+head(df_input)
+```
+
+### Step 3: Naming the loaded dataframe according to the files names.
+
+This could be changed by a button to specify the desired name
+
+```{r}
+names(df_input) <- str_replace(list.files(here("data", "raw_data")), pattern = ".xlsx", replacement = "")
+head(df_input)
+```
+
+### Step4: Merge the dataframes.
+
+A single dataframe with all data is generated.\
+A new column named 'id' is created to keep the origin of the date (initial filename).
+
+*Note: When merging, the number of column is matched between the multiple files, this lead to generation of NA value for the newly created columns.
+This should be avoided*
+
+```{r}
+df <- bind_rows(df_input, .id = 'id')
+head(df)
+```
+
+### Step5: Reshaping data to tidy format
+
+1.  Remove empty space in data frame and replace it by an underscore.\
+    The function "str_replace" is used to replace a character string with another one.\
+    Here the space ' ' is replaced by underscore '\_' with the arguments "pattern =" and "replacement =".
+
+```{r}
+names(df) <- str_replace(names(df), pattern = " ", replacement = "_")
+head(df)
+```
+
+2.  Give the generic name "Time" to the column "Time (sec)".\
+    The function"rename" is used to change the name of the column in the following way: "new_name=old_name". **This might be changed with a user input command to choose the desired name**
+
+```{r}
+df <- rename(df, Time='Time_(sec)')
+head(df)
+```
+
+3.  Tidy the data.\
+    All the value data for every sample are attributed to a single column.\
+    The function pivot_longer is used with the following arguments:\
+    -   'cols = -c(id, Time)' exclude (with the '-' character) the columns id and Time from being modified.\
+    -   'names_to = "Sample"' Creates a column with a header 'Sample' containing character string.\
+    -   'values_to = "Value"' Creates a column with a header 'Value' containing numerical values.
+
+```{r}
+df_tidy <- pivot_longer(df, 
+                        cols = -c(id, Time),
+                        names_to = "Sample",
+                        values_to = "Value")
+head(df_tidy)
+```
+
+4.  Delete " from the Sample column:
+
+````{r}
+
+ df_tidy <- df_tidy %>% mutate(across(everything(), ~ map_chr(.x, ~ gsub("\"", "", .x))))
+
+head(df_tidy)
+
+````
+
+
+5. Delete the columns with NA values
+````{r}
+
+df_tidy_noNA <- drop_na(df_tidy, Value)
+
+head(df_tidy_noNA)
+
+````
+
+
+6.  Save the tidy dataframe.\
+
+```{r}
+df_tidy_noNA %>% write.csv(file.path(here("data", "processed_data"), "tidy_merged_data.csv"), row.names = FALSE)
+```
+
+----------------------------------------
+
+
+Area under the curve for WT
+
+
+````{r}
+
+df_tidy_filtered <- filter(df_tidy_noNA, id == '2018-10-30_PC3_WT-TG')
+
+head(df_tidy_filtered)
+
+````
+
+  1.1 Convert Time and Values as numerical (from Character)
+
+````{r}
+
+df_tidy_filtered$Time <- as.numeric(as.character(df_tidy_filtered$Time))
+
+df_tidy_filtered$Value <- as.numeric(as.character(df_tidy_filtered$Value))
+
+head(df_tidy_filtered)
+
+````
+
+  1. Test group by Time
+  
+````{r}
+
+filtered_grouped_by_time <- group_by(df_tidy_filtered, Time)
+
+head(filtered_grouped_by_time)
+
+````
+  
+  
+  
+  2. Get stats from grouped
+  
+````{r}
+
+avg_filtered_grouped_by_time <- summarise(filtered_grouped_by_time, Average = mean(Value), StdError = sm_stdErr(Value))
+
+head(avg_filtered_grouped_by_time)
+
+````
+
+  3. Generate plot
+
+````{r}
+
+avg_filtered_grouped_by_time %>% ggplot(aes(x = Time, y = Average)) +
+  geom_area(fill = sm_color('skyblue'), alpha = 0.4) +
+  geom_point(size = 2, color = sm_color('skyblue')) +
+  geom_line(size = 1, color = sm_color('skyblue')) +
+  geom_errorbar(aes(ymin = Average - StdError, ymax = Average + StdError), size = .75, width = 0.05, color = sm_color('skyblue')) 
+
+````
+
+
+4. Calculate the area under the curve
+
+
+````{r}
+
+x <- c(avg_filtered_grouped_by_time$Time)
+
+head(x)
+
+````
+
+````{r}
+
+sm_auc(x, avg_filtered_grouped_by_time$Average)
+
+````
+
+
+----------------------------------------
+
+
+Area under the curve for ORAI1mCH
+
+````{r}
+
+head(df_tidy_noNA)
+
+````
+
+````{r}
+
+df_tidy_filtered_ORAI1mCh <- filter(df_tidy_noNA, id == '2018-10-30_PC3+ORAI1mCh-TG')
+
+head(df_tidy_filtered_ORAI1mCh)
+
+````
+
+  1.1 Convert Time and Values as numerical (from Character)
+
+````{r}
+
+df_tidy_filtered_ORAI1mCh$Time <- as.numeric(as.character(df_tidy_filtered_ORAI1mCh$Time))
+
+df_tidy_filtered_ORAI1mCh$Value <- as.numeric(as.character(df_tidy_filtered_ORAI1mCh$Value))
+
+head(df_tidy_filtered_ORAI1mCh)
+
+````
+
+  1. Test group by Time
+  
+````{r}
+
+filtered_grouped_by_time_ORAI1mCh <- group_by(df_tidy_filtered_ORAI1mCh, Time)
+
+head(filtered_grouped_by_time_ORAI1mCh)
+
+````
+  
+  
+  
+  2. Get stats from grouped
+  
+````{r}
+
+avg_filtered_grouped_by_time_ORAI1mCh <- summarise(filtered_grouped_by_time_ORAI1mCh, Average = mean(Value), StdError = sm_stdErr(Value))
+
+head(avg_filtered_grouped_by_time_ORAI1mCh)
+
+````
+
+  3. Generate plot
+
+````{r}
+
+avg_filtered_grouped_by_time_ORAI1mCh %>% ggplot(aes(x = Time, y = Average)) +
+  geom_area(fill = sm_color('skyblue'), alpha = 0.4) +
+  geom_point(size = 2, color = sm_color('skyblue')) +
+  geom_line(size = 1, color = sm_color('skyblue')) +
+  geom_errorbar(aes(ymin = Average - StdError, ymax = Average + StdError), size = .75, width = 0.05, color = sm_color('skyblue')) 
+
+````
+
+
+4. Calculate the area under the curve
+
+
+````{r}
+
+x <- c(avg_filtered_grouped_by_time_ORAI1mCh$Time)
+
+head(x)
+
+````
+
+````{r}
+
+sm_auc(x, avg_filtered_grouped_by_time_ORAI1mCh$Average)
+
+````
+
+----------------------
+
+Use sm_auc_all
+
+
+````{r}
+
+sm_auc_all(data = df_tidy_noNA, subjects = 'Sample', conditions = 'id', x = 'Time', values = 'Value')
+
+
+````
+
+Requirements:
+  1. For sm_auc_to_work:
+  -> subset the datasets in order to obtain the same range of Time values for the different conditions
+  
+  2. To obtain consistent values:
+  -> "Normalize"? the dataset in roder to obtain a similar baseline?
+  
+  3. To obtain statistics:
+  -> Calculate the auc for every single trace and then calculate the average and StdError
+  
+  
+
+
+
+
+<!-- -------------------------------------------------------------------- 
+
+
+1. Group_by id (conditions) (dplyr)
+
+*Note: grouping doesn't change how the data looks (apart from listing how it's grouped),
+It changes how it acts with the other dplyr verbs:
+by_cyl %>% summarise(
+  disp = mean(disp),
+  hp = mean(hp)*
+See: https://dplyr.tidyverse.org/reference/group_by.html
+
+  2.1. Test group by id
+  
+````{r}
+
+grouped_by_id <- group_by(df_tidy_noNA, id)
+
+head(grouped_by_id)
+
+````
+
+
+
+
+
+
+
+  2.2. Get stats from grouped
+  
+````{r}
+
+avg_grouped <- summarise(grouped_by_id, Average = mean(Value), StdError = sm_stdErr(Value))
+
+head(avg_grouped)
+
+````
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------
+1.  Filtering for a single cell
+
+````{r}
+
+df_tidy_filtered <- filter(df_tidy_noNA, Sample == 'R2_R1')
+
+head(df_tidy_filtered)
+
+````
+
+2.  Group_by (dplyr)
+
+*Note: grouping doesn't change how the data looks (apart from listing how it's grouped),
+It changes how it acts with the other dplyr verbs:
+by_cyl %>% summarise(
+  disp = mean(disp),
+  hp = mean(hp)*
+See: https://dplyr.tidyverse.org/reference/group_by.html
+
+  2.1. Test group by Time
+  
+````{r}
+
+by_time_fitlered <- group_by(df_tidy_filtered, id)
+
+head(by_time_fitlered)
+
+````
+
+  2.2. Get stats from grouped
+  
+````{r}
+
+avg_grouped <- summarise(by_time_fitlered, Average = mean(Value), StdError = sm_stdErr(Value))
+
+head(avg_grouped)
+
+````
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------------------------------------------------------------------
+### Step 5: Get the number of sample (using the unique function)
+
+````{r}
+
+df_tidy$Sample <- factor(df_tidy$Sample)
+unique(df_tidy$Sample)
+
+````
+
+
+
+
+-------------------------------------
+
+
+
+#### Test stats for one condition (PC3-WT vs PC3+ORAI1mCherry).
+
+````{r}
+
+df_tidy_conditions <- group_by(df_tidy, Time)
+head(df_tidy_conditions)
+
+```` 
+
+
+````{r}
+
+df_tidy_conditions_noNA <- drop_na(df_tidy_conditions, Value) 
+head(df_tidy_conditions_noNA)
+
+````
+
+````{r}
+
+df_tidy_conditions_noNA$Time <- as.numeric(df_tidy_conditions_noNA$Time)
+df_tidy_conditions_noNA$Value <- as.numeric(df_tidy_conditions_noNA$Value)
+
+head(df_tidy_conditions_noNA)
+
+````
+
+````{r}
+
+avg_PC3_WT <- summarise(df_tidy_conditions_noNA, Average = mean(Value), StdError = sm_stdErr(Value))
+
+view(avg_PC3_WT)
+
+````
+
+Verify if PC3 WT aare slected and how to comapre different conditions
+
+
+
+
+
+
+
+-------------------------------------------------------------------------------
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+### Step 1: Create an object that includes the path to the data files.
+
+
+-->
